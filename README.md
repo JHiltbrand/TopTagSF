@@ -10,7 +10,13 @@ The current work flow is based on Combine v9, so the following commands can be f
 cmsrel CMSSW_11_3_4
 cd CMSSW_11_3_4/src
 cmsenv
-git clone https://github.com/cms-analysis/HiggsAnalysis-CombinedLimit.git HiggsAnalysis/CombinedLimit
+git clone git@github.com:cms-analysis/HiggsAnalysis-CombinedLimit.git HiggsAnalysis/CombinedLimit
+git clone git@github.com:cms-analysis/CombineHarvester.git
+
+git clone git@github.com:JHiltbrand/TopTagSF.git
+
+cp TagAndProbeExtended.py HiggsAnalysis/CombinedLimit/python
+
 cd HiggsAnalysis/CombinedLimit
 
 git fetch origin

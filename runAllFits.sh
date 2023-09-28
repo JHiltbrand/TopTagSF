@@ -1,62 +1,142 @@
 #!/bin/bash
 
-OUTPUTDIR=$1
+INPUTDIR=
+OUTPUTDIR=
+MAKEINPUTS=true
+RUNCOMBINE=true
+YEARS=("2016preVFP" "2016postVFP" "2017" "2018")
+TAGGERS=("Mrg" "Res")
+MEASURES=("Eff" "Mis")
+PTBINS=()
+DOSYST=true
 
-mkdir -p ${OUTPUTDIR}
+while [[ $# -gt 0 ]]
+do
+    case "$1" in
+        --inputDir)
+            INPUTDIR="$2"
+            shift 2
+            ;;
+        --outputDir)
+            OUTPUTDIR="$2"
+            shift 2
+            ;;
+        --doImpacts)
+            RUNIMPACTS=true
+            shift
+            ;;
+        --makeInputs)
+            MAKEINPUTS=true
+            shift
+            ;;
+        --runCombine)
+            RUNCOMBINE=true
+            shift
+            ;;
+        --years)
+            YEARS=()
+            while [[ "$2" == *"20"* && $# -gt 1 ]]
+            do
+                YEARS+=("$2")
+                shift
+            done
+            shift
+            ;;
+        --taggers)
+            TAGGERS=()
+            while [[ $2 != *"--"* && $# -gt 1 ]]
+            do
+                TAGGERS+=("$2")
+                shift
+            done
+            shift
+            ;;
+        --measures)
+            MEASURES=()
+            while [[ $2 != *"--"* && $# -gt 1 ]]
+            do
+                MEASURES+=("$2")
+                shift
+            done
+            shift
+            ;;
+        --ptBins)
+            PTBINS=()
+            while [[ $2 == *"to"* && $# -gt 1 ]]
+            do
+                PTBINS+=("$2")
+                shift
+            done
+            shift
+            ;;
+        --doSysts)
+            DOSYSTS=true
+            shift
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
+done
 
-MAKEINPUTS=$2
-
-RUNCOMBINE=$3
-
-if [ ${MAKEINPUTS} -eq 1 ]
+if [ "${MAKEINPUTS}" == true ]
 then
-    YEARS=("2016preVFP")
-    #"2016postVFP" "2017" "2018")
-    
-    #TAGGERS=("Mrg" "Res")
-    TAGGERS=("Res")
-    
-    MEASURES=("Eff" "Mis")
+    echo "Making combine inputs..."
+    mkdir -p ${OUTPUTDIR}
 
     for YEAR in "${YEARS[@]}"
     do
         for TAGGER in "${TAGGERS[@]}"
         do 
-            PTBINS=("inclusive")
-            if [ ${TAGGER} == "Mrg" ]
+            UNIQUEPTBINS=()
+            if [ ${#PTBINS[@]} -eq 0 ]
             then
-                PTBINS=("400to480" "480to600" "600to1200")
-            elif [ ${TAGGER} == "Res" ]
-            then
-                #PTBINS=("0to100" "100to150" "150to200" "200to300" "300to400" "400to1200")
-                PTBINS=("0to100")
+                if [ ${TAGGER} == "Mrg" ]
+                then
+                    UNIQUEPTBINS=("400to480" "480to600" "600to1200")
+                elif [ ${TAGGER} == "Res" ]
+                then
+                    UNIQUEPTBINS=("0to200" "200to400" "400to1200")
+                else
+                    UNIQUEPTBINS=("${PTBINS[@]}")
+                fi
             fi
 
-            for PTBIN in "${PTBINS[@]}"
+            for PTBIN in "${UNIQUEPTBINS[@]}"
             do
                 for MEASURE in "${MEASURES[@]}"
                 do
-                    echo "Making input histograms and data cards for year:${YEAR}, measure:${MEASURE}, tagger:${TAGGER}..."
-                    python makeInputsAndCards.py --inputDir /uscmst1b_scratch/lpc1/3DayLifetime/jhiltbra/TopTagSkims_hadd/ --outputDir ${OUTPUTDIR} --tree TopTagSkim --year ${YEAR} --measure ${MEASURE} --tagger ${TAGGER} --ptBin ${PTBIN} >> ${OUTPUTDIR}/makeInputsAndCards.log 2>&1
+                    echo "Making input histograms and data cards for year:${YEAR}, measure:${MEASURE}, tagger:${TAGGER}, pt:${PTBIN}..."
+                    if [ "${DOSYSTS}" == true ]
+                    then
+                        python makeInputsAndCards.py --inputDir ${INPUTDIR}/${YEAR} --outputDir ${OUTPUTDIR} --tree TopTagSkim --year ${YEAR} --measure ${MEASURE} --tagger ${TAGGER} --ptBin ${PTBIN} --doSysts >> ${OUTPUTDIR}/makeInputsAndCards.log 2>&1
+                    else
+                        python makeInputsAndCards.py --inputDir ${INPUTDIR}/${YEAR} --outputDir ${OUTPUTDIR} --tree TopTagSkim --year ${YEAR} --measure ${MEASURE} --tagger ${TAGGER} --ptBin ${PTBIN} >> ${OUTPUTDIR}/makeInputsAndCards.log 2>&1
+                    fi                      
                 done
             done
         done
     done
 fi
 
-if [ ${RUNCOMBINE} -eq 1 ]
+if [ "${RUNCOMBINE}" == true ]
 then
     STARTDIR=`pwd`
     for JOBDIR in ${OUTPUTDIR}/*
     do
-        if [ -f ${JOBDIR} ]
+        if [[ -f ${JOBDIR} ]]
         then
             continue
         fi
 
         cd ${JOBDIR}
         echo "Running combine fits for ${JOBDIR}..."
-        ./runfits.sh >> combine.log 2>&1 &
+        if [[ "${RUNIMPACTS}" == true ]]
+        then
+            ./runfits.sh 1 >> combine.log 2>&1
+        else
+            ./runfits.sh 0 >> combine.log 2>&1
+        fi
         cd ${STARTDIR}
     done
 fi

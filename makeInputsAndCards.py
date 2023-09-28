@@ -2,6 +2,7 @@
 
 import os
 import re
+import array
 import argparse
 import multiprocessing as mp
 
@@ -14,7 +15,7 @@ ROOT.TH2.SetDefaultSumw2()
 # Routine that is called for each individual histogram that is to be 
 # drawn from the input tree. All information about what to draw, selections,
 # and weights is contained in the histOps dictionary
-def makeNDhisto(year, histName, histOps, outfile, tree, isData):
+def makeNDhisto(year, histName, histOps, outfile, tree):
 
     # To efficiently TTree->Draw(), we will only "activate"
     # necessary branches. So first, disable all branches
@@ -25,9 +26,7 @@ def makeNDhisto(year, histName, histOps, outfile, tree, isData):
     weight    = histOps["weight"]
     
     # Make one big string to extract all relevant branch names from
-    concatStr = selection + "," + variable
-    if not isData:
-        concatStr = concatStr + "," + weight
+    concatStr = selection + "," + variable + "," + weight
 
     # The idea is to turn the concatStr into a comma separated list of branches
     # Parenthesis can simply be removed, operators are simply replace with a comma
@@ -50,25 +49,18 @@ def makeNDhisto(year, histName, histOps, outfile, tree, isData):
         except:
             tree.SetBranchStatus(branch, 1)
 
-    is2D = False
-    if re.search(r'^[^:]*:[^:]*$', variable):
-        is2D = True
-
     outfile.cd()
 
-    htemp = None
-    if not is2D:
-        temph = ROOT.TH1F(histName, "", histOps["xbins"], histOps["xmin"], histOps["xmax"])
+    # Handle when a list of custom bin edges is passed versus when a standard range is passed
+    if histOps["xbins"].__class__.__name__ == "list":
+        temph = ROOT.TH1F(histName, "", len(histOps["xbins"])-1, array.array('d', histOps["xbins"]))
     else:
-        temph = ROOT.TH2F(histName, "", histOps["xbins"], histOps["xmin"], histOps["xmax"], histOps["ybins"], histOps["ymin"], histOps["ymax"])
+        temph = ROOT.TH1F(histName, "", histOps["xbins"], histOps["xmin"], histOps["xmax"])
 
     # For MC, we multiply the selection string by our chosen weight in order
     # to fill the histogram with an event's corresponding weight
     drawExpression = "%s>>%s"%(variable, histName)
-    if isData:
-        tree.Draw(drawExpression, selection)
-    else:
-        tree.Draw(drawExpression, "(%s)*(%s)"%(weight,selection))
+    tree.Draw(drawExpression, "(%s)*(%s)"%(weight,selection))
       
     temph = ROOT.gDirectory.Get(histName)
     temph.Sumw2()
@@ -79,46 +71,68 @@ def makeNDhisto(year, histName, histOps, outfile, tree, isData):
 # and the list of requested histograms are drawn to the output ROOT file
 def processFile(outputDir, inputDir, year, proc, stub, histograms, treeName):
 
-    try:
-        inFileName = "%s/%s_%s.root"%(inputDir, year, stub)
-        infile = ROOT.TFile.Open(inFileName.replace("/eos/uscms/", "root://cmseos.fnal.gov///"),  "READ"); infile.cd()
-        if infile == None:
-            print("Could not open input ROOT file \"%s\""%(inFileName))
-            return
+    inFileName = "%s/%s_%s.root"%(inputDir, year, stub)
+    infile = ROOT.TFile.Open(inFileName.replace("/eos/uscms/", "root://cmseos.fnal.gov///"),  "READ"); infile.cd()
+    if infile == None:
+        print("Could not open input ROOT file \"%s\""%(inFileName))
+        return
 
-        trees = {""        : infile.Get(treeName),
-                 "JECUp"   : infile.Get(treeName + "JECup"),
-                 "JECDown" : infile.Get(treeName + "JECdown"),
-                 "JERUp"   : infile.Get(treeName + "JERup"),
-                 "JERDown" : infile.Get(treeName + "JERdown"),
-        }
+    trees = {""        : infile.Get(treeName),
+             "JECUp"   : infile.Get(treeName + "JECup"),
+             "JECDown" : infile.Get(treeName + "JECdown"),
+             "JERUp"   : infile.Get(treeName + "JERup"),
+             "JERDown" : infile.Get(treeName + "JERdown"),
+    }
 
-        for flag in ["pass", "fail"]:
+    for flag in ["pass", "fail"]:
 
-            outfile = ROOT.TFile.Open("%s/%s_%s.root"%(outputDir, proc, flag), "RECREATE")
+        outfile = ROOT.TFile.Open("%s/%s_%s.root"%(outputDir, proc, flag), "RECREATE")
 
-            isData = "Data" in proc
-            for histName, histOps in histograms.items():
-                if proc not in histName: continue
-                if flag not in histName: continue
+        for histName, histOps in histograms.items():
+            if proc not in histName: continue
+            if flag not in histName: continue
 
-                syst = histName.split("_")[-1]
+            syst = histName.split("_")[-1]
 
-                treeSyst = ""
-                if "JE" in syst:
-                    treeSyst = syst
+            treeSyst = ""
+            if "JE" in syst:
+                treeSyst = syst
 
-                nameToPass = proc
-                if syst != "":
-                    nameToPass = proc + "_" + syst
-                elif proc == "JetHT" or proc == "SingleMuon":
-                    nameToPass = "data_obs"
+            nameToPass = proc
+            if syst != "":
+                nameToPass = proc + "_" + syst
+            elif proc == "JetHT" or proc == "SingleMuon":
+                nameToPass = "data_obs"
 
-                makeNDhisto(year, nameToPass, histOps, outfile, trees[treeSyst], isData)
+            makeNDhisto(year, nameToPass, histOps, outfile, trees[treeSyst])
 
-            outfile.Close()
-    except Exception as e:
-        print(e)
+        outfile.Close()
+
+def writeLine(processes, card, header1, header2, value1, value2, appliesTo):
+
+    headerSpace = 16
+    passfailspace = "    "
+    columnSpacing = 12
+
+    line = [header1.ljust(headerSpace/2), header2.ljust(headerSpace/2)]
+
+    for process in processes:
+        insertVal = str(value1).replace("$PNAME", process).replace("$PINST", str(processes.index(process)))
+        if appliesTo[0] == "ALL" or process in appliesTo:
+            line.append(insertVal.ljust(columnSpacing))
+        else:
+            line.append("--".ljust(columnSpacing))
+    line.append(passfailspace)
+    for process in processes:
+        insertVal = str(value2).replace("$PNAME", process).replace("$PINST", str(processes.index(process)))
+        if appliesTo[0] == "ALL" or process in appliesTo:
+            line.append(insertVal.ljust(columnSpacing))
+        else:
+            line.append("--".ljust(columnSpacing))
+    line.append("\n")
+    card.write("".join(line))
+
+    return card
 
 def makeDatacard(outputDir, processes, systematics, measure, year):
 
@@ -147,45 +161,14 @@ def makeDatacard(outputDir, processes, systematics, measure, year):
     card.write("observation     " + str(hobs_pass.Integral(1,hobs_pass.GetNbinsX())).ljust(15) + str(hobs_fail.Integral(1,hobs_fail.GetNbinsX())) + "\n\n")
     card.write("------------\n\n")
 
-    adjustlead = 16
-    adjust = 12
+    fpass.Close()
+    ffail.Close()
 
-    passfailspace = "    "
+    card = writeLine(processes.keys(), card, "bin",     "",   "pass",   "fail", ["ALL"])
+    card = writeLine(processes.keys(), card, "process", "", "$PNAME", "$PNAME", ["ALL"])
+    card = writeLine(processes.keys(), card, "process", "", "$PINST", "$PINST", ["ALL"])
+    card = writeLine(processes.keys(), card, "rate",    "",       -1,       -1, ["ALL"])
 
-    binline   = ["bin".ljust(adjustlead)]
-    pnameline = ["process".ljust(adjustlead)]
-    pinstline = ["process".ljust(adjustlead)]
-    rateline  = ["rate".ljust(adjustlead)]
-    pinst = 0
-    for proc in processes.keys():
-        hpass = fpass.Get(proc)
-        pnameline.append(proc.ljust(adjust))
-        pinstline.append(str(pinst).ljust(adjust))
-        rateline.append(str("%.3f"%hpass.Integral(1,hpass.GetNbinsX())).ljust(adjust))
-        binline.append("pass".ljust(adjust))
-        pinst += 1
-    pnameline.append(passfailspace)
-    pinstline.append(passfailspace)
-    rateline.append(passfailspace)
-    binline.append(passfailspace)
-    pinst = 0
-    for proc in processes.keys():
-        hfail = ffail.Get(proc)
-        pnameline.append(proc.ljust(adjust))
-        pinstline.append(str(pinst).ljust(adjust))
-        rateline.append(str("%.3f"%hfail.Integral(1,hfail.GetNbinsX())).ljust(adjust))
-        binline.append("fail".ljust(adjust))
-        pinst += 1
-    
-    binline.append("\n")
-    pnameline.append("\n")
-    pinstline.append("\n")
-    rateline.append("\n")
-
-    card.write("".join(binline))
-    card.write("".join(pnameline))
-    card.write("".join(pinstline))
-    card.write("".join(rateline))
     card.write("\n------------\n\n")
 
     lumiSystVal = 1.012
@@ -194,48 +177,42 @@ def makeDatacard(outputDir, processes, systematics, measure, year):
     elif year == 2018:
         lumiSystVal = 1.025
 
-    lumiline = ["lumi".ljust(adjustlead/2), "lnN".ljust(adjustlead/2)]
-    
-    for iproc in range(len(processes.keys())):
-        lumiline.append(str(lumiSystVal).ljust(adjust))
-    lumiline.append(passfailspace)
-    for iproc in range(len(processes.keys())):
-        lumiline.append(str(lumiSystVal).ljust(adjust))
-    lumiline.append("\n")
-    card.write("".join(lumiline))
+    card = writeLine(processes.keys(), card, "lumi", "lnN", lumiSystVal, lumiSystVal, ["ALL"])
 
-    for syst in systematics:
-        if syst == "": continue
+    noSysts = len(systematics) == 0
 
-        # Use Up version as syst name while stripping up/down
-        if "Down" in syst: continue
-
-        systName = syst.replace("Up", "")
-
-        systline = [systName.ljust(adjustlead/2), "shape".ljust(adjustlead/2)]
-
-        for iproc in range(len(processes.keys())):
-            systline.append(str(1).ljust(adjust))
-        systline.append(passfailspace)
-        for iproc in range(len(processes.keys())):
-            systline.append(str(1).ljust(adjust))
-        systline.append("\n")
-        card.write("".join(systline))
+    if noSysts:
+        # Minimum add 50% uncertainty for QCD
+        card = writeLine(processes.keys(), card, "QCDnorm", "lnN", 1.5, 1.5, ["QCD"])
+    else:
+        for syst in systematics:
+            # Use Up version as syst name while stripping up/down
+            card = writeLine(processes.keys(), card, syst, "shape", 1, 1, ["ALL"])
 
     card.write("\n*  autoMCStats  0\n")
+    card.close()
 
-def makeCombineScript(outputDir, processes, year):
+def makeCombineScript(outputDir, categories, year):
 
     script = open("%s/runfits.sh"%(outputDir), "w")
 
-    categories = ",".join(processes.keys())
-
+    script.write("DOIMPACTS=0\n\n")
+    script.write("if [[ $# -gt 0 ]]\n")
+    script.write("then\n")
+    script.write("    DOIMPACTS=$1\n")
+    script.write("fi\n\n")
     script.write("echo \"Do tag and probe\"\n")
-    script.write("text2workspace.py -m 173.2 -P HiggsAnalysis.CombinedLimit.TagAndProbeModel:tagAndProbe sf.txt --PO categories=%s\n\n"%(categories))
-    script.write("echo \"Do the MultiDimFit\"\n")
-    script.write("combine -M MultiDimFit -m 173.2 sf.root --algo=singles --robustFit=1 --cminDefaultMinimizerTolerance 5.\n\n")
+    script.write("text2workspace.py -m 173.2 -P HiggsAnalysis.CombinedLimit.TagAndProbeExtended:tagAndProbe sf.txt --PO categories=%s\n\n"%(categories))
     script.write("echo \"Run the FitDiagnostics\"\n")
-    script.write("combine -M FitDiagnostics -m 173.2 sf.root --saveShapes --saveWithUncertainties --robustFit=1 --cminDefaultMinimizerTolerance 5.\n\n")
+    script.write("combine -M FitDiagnostics -m 173.2 sf.root --saveShapes --saveWithUncertainties --robustFit=1 --setRobustFitStrategy 1 --X-rtd MINIMIZER_analytic --cminDefaultMinimizerTolerance 5.\n\n")
+    script.write("if [[ ${DOIMPACTS} -eq 1 ]]\n")
+    script.write("then\n")
+    script.write("    echo \"Run impacts\"\n")
+    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --doInitialFit --robustFit 1\n")
+    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --robustFit 1 --doFits --parallel 4\n")
+    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 -o impacts.json\n")
+    script.write("    plotImpacts.py -i impacts.json -o impacts\n")
+    script.write("fi\n")
 
     script.close()
 
@@ -244,14 +221,15 @@ def makeCombineScript(outputDir, processes, year):
 if __name__ == "__main__":
     usage = "%makeInputsAndCards [options]"
     parser = argparse.ArgumentParser(usage)
-    parser.add_argument("--inputDir",  dest="inputDir",  help="Path to ntuples",    required=True                   )
-    parser.add_argument("--outputDir", dest="outputDir", help="storing combine",    required=True                   )
-    parser.add_argument("--tree",      dest="tree",      help="TTree name to draw", default="AnaSkim"               )
-    parser.add_argument("--year",      dest="year",      help="which year",         default="Run2UL"                )
-    parser.add_argument("--options",   dest="options",   help="options file",       default="makeInputsAndCards_aux")
-    parser.add_argument("--measure",   dest="measure",   help="Eff or mis measure", required=True)
-    parser.add_argument("--tagger",    dest="tagger",    help="Which tagger",       required=True)
-    parser.add_argument("--ptBin",     dest="ptBin",     help="top pt bin",         default="inclusive")
+    parser.add_argument("--inputDir",  dest="inputDir",  help="Path to ntuples",    required=True                     )
+    parser.add_argument("--outputDir", dest="outputDir", help="storing combine",    required=True                     )
+    parser.add_argument("--tree",      dest="tree",      help="TTree name to draw", default="TopTagSFTree"            )
+    parser.add_argument("--year",      dest="year",      help="which year",         default="Run2UL"                  )
+    parser.add_argument("--options",   dest="options",   help="options file",       default="makeInputsAndCards_aux"  )
+    parser.add_argument("--measure",   dest="measure",   help="Eff or mis measure", required=True                     )
+    parser.add_argument("--tagger",    dest="tagger",    help="Which tagger",       required=True                     )
+    parser.add_argument("--ptBin",     dest="ptBin",     help="top pt bin",         default="inclusive"               )
+    parser.add_argument("--doSysts",   dest="doSysts",   help="include systs",      default=False, action="store_true")
 
     args = parser.parse_args()
     
@@ -261,15 +239,11 @@ if __name__ == "__main__":
     # and thus are kept in separate sidecar file.
     importedGoods = __import__(args.options)
 
-    processes, histograms, systematics = importedGoods.initHistos(args.year, args.measure, args.tagger, args.ptBin)
+    processes, histograms, systematics = importedGoods.initHistos(args.year, args.measure, args.tagger, args.ptBin, args.doSysts)
     
     for hname, ops in histograms.items():
         print(hname, ops)
 
-    inputDir  = args.inputDir
-    treeName  = args.tree
-    year      = args.year
-    
     base = os.getenv("PWD")
     
     # The draw histograms and their host ROOT files are kept in the output
@@ -291,15 +265,18 @@ if __name__ == "__main__":
     
     # The processFile function is attached to each process
     for proc, stub in processes.items():
-        pool.apply_async(processFile, args=(outputDir, inputDir, year, proc, stub, histograms, treeName))
+        pool.apply_async(processFile, args=(outputDir, args.inputDir, args.year, proc, stub, histograms, args.tree))
     
     pool.close()
     pool.join()
 
+    # Hadd ROOT files with the drawn histograms into two total ROOT files and cleanup the rest
     os.system("hadd -f %s/top_mass_pass.root %s/*_pass.root >> %s/python.log 2>&1"%(outputDir, outputDir, outputDir))
     os.system("hadd -f %s/top_mass_fail.root %s/*_fail.root >> %s/python.log 2>&1"%(outputDir, outputDir, outputDir))
     os.system("rm %s/[A-Z]*_{fail,pass}.root >> %s/python.log"%(outputDir, outputDir))
 
-    makeDatacard(outputDir, processes, systematics, args.measure, year)
+    makeDatacard(outputDir, processes, systematics, args.measure, args.year)
 
-    makeCombineScript(outputDir, processes, year)
+    categories = ",".join(processes)
+
+    makeCombineScript(outputDir, categories, args.year)

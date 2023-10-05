@@ -97,11 +97,11 @@ def initHistos(year, measurement, tagger, ptbin, doSysts):
                         hopsCopy = copy.copy(histoOps)
 
                         if   tagger == "Res":
-                            if "1200" in ptbin and measurement == "Eff":
+                            if "Inf" in ptbin and measurement == "Eff":
                                 hopsCopy["xbins"] = 15
                         elif tagger == "Mrg":
                             if measurement == "Eff": 
-                                hopsCopy["xbins"] = range(100, 220, 10) + [220., 285., 350.]
+                                hopsCopy["xbins"] = range(100, 220, 20) + [220., 285., 350.]
                             else:
                                 hopsCopy["xbins"] = [0., 100.] + range(110, 250, 10) + [250., 275., 300., 500.] 
 
@@ -114,17 +114,14 @@ def initHistos(year, measurement, tagger, ptbin, doSysts):
                         # Resolved string "100to150" to make selection on top pt
                         ptSel = ""
                         if "to" in ptbin:
-                            ptSel = "&&best%sTopPt%s>%s&&best%sTopPt%s<=%s"%(topType, systTreeStub, ptbin.split("to")[0], topType, systTreeStub, ptbin.split("to")[-1])
+                            ptRange = ptbin.split("to")
+                            ptSel = "&&best%sTopPt%s>%s&&best%sTopPt%s<=%s"%(topType, systTreeStub, ptRange[0], topType, systTreeStub, ptRange[-1].replace("Inf", "9999"))
 
                         hopsCopy["selection"] = selExp.replace("${WP}", str(WP)).replace("${SYST}", systTreeStub) + extraSel + ptSel
 
                         if "Data" in stub: hopsCopy["weight"] = "Weight"
                         else:              hopsCopy["weight"] = hopsCopy["weight"].replace("${PROC}", proc).replace("${SYST}", systTreeStub)
 
-                        # Divide out b tag SF from total event weight for QCD CR
-                        if proc == "QCD" and syst == "" and "Data" not in stub:
-                            hopsCopy["weight"] += "/bTagSF_EventWeightSimple_Central"
-                       
                         hopsCopy["variable"] = hopsCopy["variable"].replace("${SYST}", systTreeStub)
 
                         if   systematic == "puUp":      hopsCopy["weight"] += "*puSysUpCorr/puWeightCorr"

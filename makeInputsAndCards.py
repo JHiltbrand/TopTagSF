@@ -3,6 +3,7 @@
 import os
 import re
 import array
+import shutil
 import argparse
 import multiprocessing as mp
 
@@ -192,7 +193,7 @@ def makeDatacard(outputDir, processes, systematics, measure, year):
     card.write("\n*  autoMCStats  0\n")
     card.close()
 
-def makeCombineScript(outputDir, categories, year):
+def makeCombineScript(outputDir, categories, year, tagger, measure, ptBin):
 
     script = open("%s/runfits.sh"%(outputDir), "w")
 
@@ -208,10 +209,11 @@ def makeCombineScript(outputDir, categories, year):
     script.write("if [[ ${DOIMPACTS} -eq 1 ]]\n")
     script.write("then\n")
     script.write("    echo \"Run impacts\"\n")
-    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --doInitialFit --robustFit 1\n")
-    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --robustFit 1 --doFits --parallel 4\n")
-    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 -o impacts.json\n")
+    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --doInitialFit --robustFit 1 --exclude 'rgx{prop.*}'\n")
+    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --robustFit 1 --doFits --parallel 4 --exclude 'rgx{prop.*}'\n")
+    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 -o impacts.json --exclude 'rgx{prop.*}'\n")
     script.write("    plotImpacts.py -i impacts.json -o impacts\n")
+    script.write("    mv impacts.pdf %s_%s_%s%s_impacts.pdf\n"%(year, tagger, measure, ptBin))
     script.write("fi\n")
 
     script.close()
@@ -223,13 +225,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(usage)
     parser.add_argument("--inputDir",  dest="inputDir",  help="Path to ntuples",    required=True                     )
     parser.add_argument("--outputDir", dest="outputDir", help="storing combine",    required=True                     )
-    parser.add_argument("--tree",      dest="tree",      help="TTree name to draw", default="TopTagSFTree"            )
+    parser.add_argument("--tree",      dest="tree",      help="TTree name to draw", default="TopTagSFSkim"            )
     parser.add_argument("--year",      dest="year",      help="which year",         default="Run2UL"                  )
     parser.add_argument("--options",   dest="options",   help="options file",       default="makeInputsAndCards_aux"  )
     parser.add_argument("--measure",   dest="measure",   help="Eff or mis measure", required=True                     )
     parser.add_argument("--tagger",    dest="tagger",    help="Which tagger",       required=True                     )
     parser.add_argument("--ptBin",     dest="ptBin",     help="top pt bin",         default="inclusive"               )
     parser.add_argument("--doSysts",   dest="doSysts",   help="include systs",      default=False, action="store_true")
+    parser.add_argument("--overwrite", dest="overwrite", help="clear existing dir", default=False, action="store_true")
 
     args = parser.parse_args()
     
@@ -254,9 +257,17 @@ if __name__ == "__main__":
     if args.ptBin != "inclusive":
         ptBinStr = "_topPt%s"%(args.ptBin)
             
-    outputDir = "%s/%s/%s_inputs_%s_%s%s/"%(base,args.outputDir,args.year,args.measure,args.tagger,ptBinStr)
+    outputDir = "%s/%s/%s_inputs_%s_%s%s/"%(base,args.outputDir,args.year,args.tagger,args.measure,ptBinStr)
     if not os.path.exists(outputDir):
         os.makedirs(outputDir)
+    else:
+        if args.overwrite:
+            print("Removing existing directory \"%s\" and recreating..."%(outputDir))
+            shutil.rmtree(outputDir)
+            os.makedirs(outputDir)
+        else:
+            print("Must specify '--overwrite' option if inputs folder already exists!")
+            quit()
     
     # For speed, histogramming for each specified physics process, e.g. TT, QCD
     # is run in a separate pool process. This is limited to 4 at a time to avoid abuse
@@ -279,4 +290,4 @@ if __name__ == "__main__":
 
     categories = ",".join(processes)
 
-    makeCombineScript(outputDir, categories, args.year)
+    makeCombineScript(outputDir, categories, args.year, args.tagger, args.measure, ptBinStr.replace("topPt", ""))

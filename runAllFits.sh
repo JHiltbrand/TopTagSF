@@ -6,7 +6,7 @@ MAKEINPUTS=0
 RUNCOMBINE=0
 RUNIMPACTS=0
 OVERWRITE=0
-TREENAME=TopTagSkim
+TREENAME=TopTagSFSkim
 YEARS=("2016preVFP" "2016postVFP" "2017" "2018")
 TAGGERS=("Mrg" "Res")
 MEASURES=("Eff" "Mis")
@@ -87,15 +87,22 @@ do
             shift
             ;;
         *)
+            echo "Unknown option \"$1\""
             exit 1
             ;;
     esac
 done
 
-if [[ ${INPUTDIR} == "FAIL" || ${OUTPUTDIR} == "FAIL" ]]
+if [[ ${INPUTDIR} == "FAIL" && ${MAKEINPUTS} == 1 ]]
 then
-    echo "User must designate input/output directories with \"--inputDir/--outputDir\" !"
+    echo "User must designate input directory to make inputs !"
     exit 1 
+fi
+
+if [[ ${OUTPUTDIR} == "FAIL" ]]
+then
+    echo "User must designate where outputs are located !"
+    exit 1
 fi
 
 UNIQUEPTBINS=("${PTBINS[@]}")
@@ -154,35 +161,33 @@ then
         then
             continue
         fi
-        echo $JOBDIR
         for YEAR in "${YEARS[@]}"
         do
-            if [[ ${JOBDIR} != *"${YEAR}"* ]]
-            then
-                continue
-            fi
             for TAGGER in "${TAGGERS[@]}"
             do
-                if [[ ${JOBDIR} != *"${TAGGER}"* ]]
+                if [[ ${#PTBINS[@]} -eq 0 ]]
                 then
-                    continue
+                    if [[ ${TAGGER} == "Mrg" ]]
+                    then
+                        UNIQUEPTBINS=("400to480" "480to600" "600toInf")
+                    elif [[ ${TAGGER} == "Res" ]]
+                    then
+                        UNIQUEPTBINS=("0to200" "200to400" "400toInf")
+                    fi
                 fi
                 for MEASURE in "${MEASURES[@]}"
                 do
-                    if [[ ${JOBDIR} != *"${MEASURE}"* ]]
-                    then
-                        continue
-                    fi
                     for PTBIN in "${UNIQUEPTBINS[@]}"
                     do
-                        echo $PTBIN
-                        if [[ ${JOBDIR} == *"${PTBIN}"* ]]
+                        if [[ ${JOBDIR} != *"${YEAR}"* || ${JOBDIR} != *"${TAGGER}"* || ${JOBDIR} != *"${MEASURE}"* || ${JOBDIR} != *"${PTBIN}"* ]]
                         then
-                            cd ${JOBDIR}
-                            echo "Running combine fits for ${JOBDIR}..."
-                            ./runfits.sh ${RUNIMPACTS} >> combine.log 2>&1
-                            cd ${STARTDIR}
+                            continue
+                            echo ${JOBDIR}
                         fi
+                        cd ${JOBDIR}
+                        echo "Running combine fits for ${JOBDIR}..."
+                        ./runfits.sh ${RUNIMPACTS} >> combine.log 2>&1
+                        cd ${STARTDIR}
                     done
                 done
             done

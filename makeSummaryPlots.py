@@ -1,8 +1,8 @@
 #! /bin/env/python
 
 import os
-import re
 import array
+import shutil
 import argparse
 
 import ROOT
@@ -16,7 +16,6 @@ ROOT.gStyle.SetPalette(1)
 class SFresult:
 
     def __init__(self, SF, SFHiErr, SFLoErr, tagger, measurement, ptBin):
-
         self.SF          = SF
         self.SFHiErr     = SFHiErr
         self.SFLoErr     = SFLoErr
@@ -86,6 +85,8 @@ class Plotter:
 
         fitDirs = os.listdir(self.inputDir)
 
+        doEff = False
+        doMis = False
         for fitDir in fitDirs:
         
             chunks = fitDir.split("_")
@@ -94,67 +95,59 @@ class Plotter:
 
             if "topPt" not in chunks[-1]: continue
 
-            ptBin = chunks[-1].split("topPt")[-1]
+            ptBin   = chunks[-1].split("topPt")[-1].replace("Inf", "1200")
+            tagger  = chunks[2]
+            measure = chunks[3]
 
-            aResult = self.makePrePostFitPlot("%s/%s"%(self.inputDir,fitDir), ptBin, chunks[2], chunks[3], "pass")
-            _       = self.makePrePostFitPlot("%s/%s"%(self.inputDir,fitDir), ptBin, chunks[2], chunks[3], "fail")
+            fitPath = self.inputDir + "/" + fitDir
+            aResult = self.makePrePostFitPlot(fitPath, ptBin, measure, tagger, "pass")
+            _       = self.makePrePostFitPlot(fitPath, ptBin, measure, tagger, "fail")
 
-            results[aResult.uniqueId()] = aResult
+            if   measure == "Eff":
+                doEff = True
+            elif measure == "Mis":
+                doMis = True
 
-        self.getSFSummary(results, "Eff")
-        self.getSFSummary(results, "Mis")
+            if aResult != None:
+                results[aResult.uniqueId()] = aResult
 
-    def remapAxis(self, obj, tagger):
+            impactsFile = fitDir.replace("/", "").replace("_inputs", "").replace("topPt", "") + "_impacts.pdf"
+            impactsPath = fitPath + "/" + impactsFile 
+            if os.path.exists(impactsPath):
+                shutil.copyfile(impactsPath, self.outputDir + "/" + impactsFile.replace("Inf", "1200"))
 
-        minimum = None
-        maximum = None
-        if   tagger == "Mrg":
-            minimum = 105.0
-            maximum = 210.0
-        elif tagger == "Res":
-            minimum = 100.0
-            maximum = 250.0
+        if doEff:
+            self.getSFSummary(results, "Eff")
+        if doMis:
+            self.getSFSummary(results, "Mis")
+
+    def remapAxis(self, obj, objRef):
+
+        nbins = objRef.GetNbinsX()
+        edges = []
+        for iBin in range(1, nbins+1):
+            edges.append(objRef.GetXaxis().GetBinLowEdge(iBin))
+        edges.append(objRef.GetXaxis().GetBinUpEdge(nbins))
+
+        name  = obj.GetName()
+        newHisto = ROOT.TH1F(name, name, nbins, array.array('d', edges))
+        newHisto.SetDirectory(0)
 
         if "TH1" in obj.ClassName():
-            nbins = obj.GetNbinsX()
-            name  = obj.GetName()
-            newHisto = ROOT.TH1F(name,name,nbins,minimum,maximum)
-            newHisto.SetDirectory(0)
-
             for iBin in range(1, nbins+1):
-                newHisto.SetBinContent(iBin,obj.GetBinContent(iBin))
-                newHisto.SetBinError(iBin,obj.GetBinError(iBin))
-    
-            return newHisto
-
+                newHisto.SetBinContent(iBin, obj.GetBinContent(iBin))
+                newHisto.SetBinError(iBin, obj.GetBinError(iBin))
         elif "TGraph" in obj.ClassName():
-
-            N = obj.GetN()
-            xval = obj.GetX()
-            yval = obj.GetY()
-            xvalerrhi = obj.GetEXhigh()
-            xvalerrlo = obj.GetEXlow()
-            yvalerrhi = obj.GetEYhigh()
-            yvalerrlo = obj.GetEYlow()
-
-            scaleX = (maximum - minimum) / float(N)
-            for iPoint in range(0, N):
-                xval[iPoint] = minimum + xval[iPoint]*scaleX
-
-            newGraph = ROOT.TGraphAsymmErrors(N,xval,yval,xvalerrlo,xvalerrhi,yvalerrlo,yvalerrhi)
-
-            return newGraph
+             for iBin in range(1, nbins+1):
+                newHisto.SetBinContent(iBin, objRef.GetBinContent(iBin))
+                newHisto.SetBinError(iBin, objRef.GetBinError(iBin))
+   
+        return newHisto
 
     def getDataMCratio(self, data, fit):
     
-        tempData = fit.Clone("tempData")
-        tempData.SetName("tempData")
-        for iBin in range(0, tempData.GetNbinsX()):
-            tempData.SetBinContent(iBin+1, data.GetY()[iBin])
-            tempData.SetBinError(iBin+1, (data.GetEYlow()[iBin]+data.GetEYhigh()[iBin])/2.0)
-    
-        ratio = tempData.Clone("ratio")
-        ratio.Divide(tempData, fit)
+        ratio = data.Clone("ratio")
+        ratio.Divide(data, fit)
         ratio.SetMarkerStyle(20)
         ratio.SetMarkerSize(1)
         ratio.SetLineWidth(2)
@@ -195,9 +188,10 @@ class Plotter:
         mark.SetTextAlign(31)
         mark.DrawLatex(1 - rightMargin, 1 - (topMargin - 0.017), "%.1f fb^{-1} (13 TeV)"%(self.lumis[self.year]))
 
-    def extractHistos(self, folder, tagger):
+    def extractHistos(self, folder, inputs):
 
         histos = {}
+        histoRef = inputs.Get("data_obs")
         for key in folder.GetListOfKeys():
     
             if "TH1" not in key.GetClassName() and "TGraph" not in key.GetClassName(): continue
@@ -209,7 +203,8 @@ class Plotter:
                 histo.SetDirectory(0)
     
             process = histo.GetName()
-            histos[process] = self.remapAxis(histo, tagger)
+
+            histos[process] = self.remapAxis(histo, histoRef)
         
         return histos
    
@@ -220,21 +215,43 @@ class Plotter:
             orderedNames = ["TTmatch", "TTunmatch", "QCD", "WJets", "DYJets", "Boson", "TTX", "ST", "total", "data"]
         elif measurement == "Mis":
             orderedNames = ["QCD", "TT", "WJets", "DYJets", "Boson", "TTX", "ST", "total", "data"]
+
+        finputs = ROOT.TFile.Open("%s/top_mass_%s.root"%(fitpath, category), "READONLY")
+        if finputs == None:
+            return None
    
         fdiag = ROOT.TFile.Open("%s/fitDiagnosticsTest.root"%(fitpath), "READONLY")
+        if fdiag == None:
+            return None
     
         prefitFolder = fdiag.Get("shapes_prefit/%s"%(category))
-        prefitHistos = self.extractHistos(prefitFolder, tagger)
+        if prefitFolder == None:
+            return None
+
+        prefitHistos = self.extractHistos(prefitFolder, finputs)
     
         postfitFolder = fdiag.Get("shapes_fit_s/%s"%(category))
-        postfitHistos = self.extractHistos(postfitFolder, tagger)
+        if postfitFolder == None:
+            return None
+
+        postfitHistos = self.extractHistos(postfitFolder, finputs)
+
+        SF      = -1.0
+        SFLoErr = 0.
+        SFHiErr = 0.
 
         ttree = fdiag.Get("tree_fit_sb")
-        ttree.GetEntry(0)
-
-        SF      = ttree.SF
-        SFLoErr = ttree.SFLoErr
-        SFHiErr = ttree.SFHiErr
+        if ttree != None:
+            ttree.GetEntry(0)
+        
+            if   measurement == "Eff":
+                SF      = ttree.SF_TTmatch
+                SFLoErr = ttree.SF_TTmatchLoErr
+                SFHiErr = ttree.SF_TTmatchHiErr
+            elif measurement == "Mis":
+                SF      = ttree.SF_QCD
+                SFLoErr = ttree.SF_QCDLoErr
+                SFHiErr = ttree.SF_QCDHiErr
     
         for hname in prefitHistos.keys():
             prefitHistos[hname].SetTitle("")
@@ -266,12 +283,19 @@ class Plotter:
         h_r_postfit.SetName("h_r_postfit")
         h_r_postfit.SetMarkerColor(1)
         h_r_postfit.SetLineColor(1)
+
+        nLegItems = 0
+        for hname in orderedNames:
+            if hname in postfitHistos:
+                nLegItems += 1
         
-        leg = ROOT.TLegend(0.73,0.50,0.95,0.90)
+        legTopStart = 0.9
+        legBottomStart = legTopStart-nLegItems*0.06
+        leg = ROOT.TLegend(0.70,legBottomStart,0.95,legTopStart)
         leg.SetFillStyle(0)
         leg.SetFillColor(0)
         leg.SetLineWidth(0)
-        leg.SetTextSize(0.04)
+        leg.SetTextSize(0.05)
         for hname in orderedNames:
             try:
                 if "data" in hname:
@@ -281,11 +305,11 @@ class Plotter:
             except:
                 pass
         
-        legfit = ROOT.TLegend(0.73,0.35,0.95,0.45)
+        legfit = ROOT.TLegend(self.LeftMargin+0.04,0.45,self.LeftMargin+0.24,0.57)
         legfit.SetFillStyle(0)
         legfit.SetFillColor(0)
         legfit.SetLineWidth(0)
-        legfit.SetTextSize(0.04)
+        legfit.SetTextSize(0.05)
         legfit.AddEntry(prefitHistos["total"],"Pre-fit","L")
         legfit.AddEntry(postfitHistos["total"],"Post-fit","L")
         
@@ -304,20 +328,21 @@ class Plotter:
         pRatio.SetRightMargin(self.RightMargin)
         pRatio.SetLeftMargin(self.LeftMargin)
         pRatio.SetTopMargin(0.00)
-        pRatio.SetBottomMargin(0.23)
+        pRatio.SetBottomMargin(0.25)
     
         pMain.Draw()
         pRatio.Draw()
         
         pMain.cd()
         
-        maxHeight = 0
-        if postfitHistos["total"].GetMaximum() > prefitHistos["total"].GetMaximum():
-            maxHeight = postfitHistos["total"].GetMaximum()
-        else:
-            maxHeight = prefitHistos["total"].GetMaximum()
+        maximums = []
+        for hname in postfitHistos.keys():
+            maximums.append(postfitHistos[hname].GetMaximum() + postfitHistos[hname].GetBinError(postfitHistos[hname].GetMaximumBin()))
+            maximums.append(prefitHistos[hname].GetMaximum() + prefitHistos[hname].GetBinError(prefitHistos[hname].GetMaximumBin()))
 
-        prefitHistos["total"].GetYaxis().SetRangeUser(-0.05*maxHeight, 1.08*maxHeight)
+        maxHeight = max(maximums)
+
+        prefitHistos["total"].GetYaxis().SetRangeUser(-0.05*maxHeight, 1.25*maxHeight)
 
         titleSize = 0.12
         labelSize = 0.09
@@ -330,7 +355,16 @@ class Plotter:
         prefitHistos["total"].GetYaxis().SetLabelSize(labelSize / scale)
         prefitHistos["total"].GetXaxis().SetTitleSize(0.0)
         prefitHistos["total"].GetXaxis().SetLabelSize(0.0)
-        prefitHistos["total"].SetMinimum(-6)
+        prefitHistos["total"].GetYaxis().SetMaxDigits(4)
+
+        xMax = 250.0
+        if tagger == "Mrg":
+            if measurement == "Eff":
+                xMax = 250.0
+            elif measurement == "Mis":
+                xMax = 250.0
+
+        #prefitHistos["total"].GetXaxis().SetRangeUser(100.0, xMax)
 
         prefitHistos["total"].Draw("HIST E0")
        
@@ -339,7 +373,7 @@ class Plotter:
             if "total" in hname:
                 postfitHistos[hname].Draw("HIST E0 sames")
             elif "data" in hname:
-                prefitHistos[hname].Draw("P sames")
+                prefitHistos[hname].Draw("EP sames")
             else:
                 prefitHistos[hname].Draw("HIST E0 sames")
                 postfitHistos[hname].Draw("HIST E0 sames")
@@ -362,18 +396,19 @@ class Plotter:
         elif tagger == "Mrg":
             taggerName = "Merged"
 
-        mark.DrawLatex(self.LeftMargin + 0.04, 0.73, taggerName)
+        mark.DrawLatex(self.LeftMargin + 0.04, 0.73, taggerName + " | %s"%(category.replace("f", "F").replace("p", "P")))
     
-        mark.SetTextFont(42)
-        mark.SetTextSize(0.045)
+        if category == "pass":
+            mark.SetTextFont(42)
+            mark.SetTextSize(0.045)
     
-        mark.DrawLatex(self.LeftMargin + 0.04, 0.66, "SF = %.2f^{+%.2f}_{-%.2f}"%(SF, SFHiErr, SFLoErr))
+            mark.DrawLatex(self.LeftMargin + 0.04, 0.66, "SF = %.2f^{+%.2f}_{-%.2f}"%(SF, SFHiErr, SFLoErr))
 
         canvas.RedrawAxis()
         
         pRatio.cd()
         h_r_postfit.GetYaxis().SetTitleOffset(0.4)
-        h_r_postfit.GetXaxis().SetTitleOffset(0.8)
+        h_r_postfit.GetXaxis().SetTitleOffset(0.9)
         h_r_postfit.GetYaxis().SetNdivisions(5,5,0)
         h_r_postfit.GetYaxis().SetTitleSize(titleSize)
         h_r_postfit.GetYaxis().SetLabelSize(labelSize)
@@ -382,10 +417,12 @@ class Plotter:
         h_r_postfit.GetXaxis().SetTitle("Top Candidate Mass [GeV]")
         h_r_postfit.GetYaxis().SetTitle("Data / Post-fit")
         h_r_postfit.GetYaxis().SetRangeUser(0.01,1.99)
+        #h_r_postfit.GetXaxis().SetRangeUser(100.0, xMax)
+
         h_r_postfit.Draw("P E0")
         canvas.RedrawAxis()
         
-        canvas.Print(self.outputDir + "/%s_%s_%s_%s.pdf"%(self.year, tagger, measurement, category))
+        canvas.Print(self.outputDir + "/%s_%s_%s_%s_%s.pdf"%(self.year, tagger, measurement, ptBin, category))
 
         return SFresult(SF, SFHiErr, SFLoErr, tagger, measurement, ptBin)
     
@@ -394,26 +431,26 @@ class Plotter:
         sfGraphs = []
         ptrange = []
 
+        names = []
+        for result in results.values():
+            if result.measurement != measurement:
+                continue
+            if result.tagger == "Res" and int(result.ptBin.split("to")[0]) >= 400:
+                continue
+            names.append(result.ptBin.replace("to", "-"))
+
+        names.sort()
+
         dummy = None
 
-        leg = ROOT.TLegend(0.60, 0.66, 0.95, 0.89)
+        leg = ROOT.TLegend(0.55, 0.66, 0.95, 0.89)
         leg.SetFillStyle(0)
         leg.SetFillColor(0)
         leg.SetLineWidth(0)
-        leg.SetTextSize(0.03)
+        leg.SetTextSize(0.035)
     
         ialgo = 0
         for algo in ["Res", "Mrg"]:
-
-            names = []
-            names.append("0-100")
-            names.append("100-150") 
-            names.append("150-200")
-            names.append("200-300")
-            names.append("300-400")
-            names.append("400-480")
-            names.append("480-600")
-            names.append("600-1200")
 
             legname = None
             color = None
@@ -425,14 +462,14 @@ class Plotter:
                 for name in names:
                     dummy.GetXaxis().SetBinLabel(names.index(name)+1, name)
                 dummy.GetYaxis().SetRangeUser(0.5,2.)
-                dummy.GetYaxis().SetTitleOffset(0.8)
+                dummy.GetYaxis().SetTitleOffset(0.9)
                 dummy.GetYaxis().SetLabelSize(0.04)
                 dummy.GetYaxis().SetTitleSize(0.05)
-                dummy.GetYaxis().SetTitle("#epsilon_{  DATA} / #epsilon_{  MC}")
+                dummy.GetYaxis().SetTitle("#epsilon_{  Data} / #epsilon_{  MC}")
                 dummy.GetXaxis().SetLabelSize(0.06)
                 dummy.GetXaxis().SetTitleSize(0.05)
                 dummy.GetXaxis().SetTitle("Top Candidate p_{T} [GeV]")
-                dummy.GetXaxis().SetTitleOffset(1.2)
+                dummy.GetXaxis().SetTitleOffset(1.25)
                 dummy.SetTitle("")
 
             elif algo == "Mrg":
@@ -464,7 +501,7 @@ class Plotter:
                         SFLoErr = result.SFLoErr
                         break
     
-                xval[iname]      = (iname+0.5) + 0.03*(ialgo)
+                xval[iname]      = (iname+0.5) + 0.08*(ialgo)
                 xvalerr[iname]   = 0.
                 yval[iname]      = SF 
                 yvalerrlo[iname] = SFLoErr
@@ -483,7 +520,7 @@ class Plotter:
             ialgo += 1
     
         canvas = ROOT.TCanvas("c_sf_%s"%(measurement), "c_sf_%s"%(measurement), 700, 500)
-        canvas.SetLeftMargin(0.08)
+        canvas.SetLeftMargin(0.10)
         canvas.SetBottomMargin(0.14)
         canvas.SetTopMargin(0.08)
         canvas.SetRightMargin(0.03)
@@ -495,7 +532,7 @@ class Plotter:
     
         leg.Draw("SAME")
 
-        self.addCMSlogo(canvas, 0.08, 0.03, 0.08)
+        self.addCMSlogo(canvas, 0.08, 0.03, 0.10)
     
         canvas.SaveAs("%s/%s_SF_%s.pdf"%(self.outputDir, self.year, measurement))
 

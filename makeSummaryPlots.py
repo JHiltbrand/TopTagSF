@@ -51,6 +51,7 @@ class Plotter:
             "ST"               : ROOT.TColor.GetColor("#fb8072"),
             "Rare"             : ROOT.TColor.GetColor("#fdb462"),
             "DYJets"           : ROOT.TColor.GetColor("#80b1d3"),
+            "Other"            : ROOT.TColor.GetColor("#80b1d3"),
             "WJets"            : 41
         }
 
@@ -66,6 +67,7 @@ class Plotter:
             "ST"               : "Single top",
             "Rare"             : "Rare",
             "DYJets"           : "Z/#gamma^{*} + jets",
+            "Other"            : "Other",
             "WJets"            : "W + jets"
         }
 
@@ -212,7 +214,7 @@ class Plotter:
 
         orderedNames = None
         if   measurement == "Eff":
-            orderedNames = ["TTmatch", "TTunmatch", "QCD", "WJets", "DYJets", "Boson", "TTX", "ST", "total", "data"]
+            orderedNames = ["TTmatch", "TTunmatch", "Other", "QCD", "WJets", "DYJets", "Boson", "TTX", "ST", "total", "data"]
         elif measurement == "Mis":
             orderedNames = ["QCD", "TT", "WJets", "DYJets", "Boson", "TTX", "ST", "total", "data"]
 
@@ -419,7 +421,17 @@ class Plotter:
         h_r_postfit.GetYaxis().SetRangeUser(0.01,1.99)
         #h_r_postfit.GetXaxis().SetRangeUser(100.0, xMax)
 
-        h_r_postfit.Draw("P E0")
+        beginX = h_r_postfit.GetXaxis().GetXmin()
+        endX   = h_r_postfit.GetXaxis().GetXmax()
+
+        h_r_postfit.Draw("P E0 SAME")
+
+        l = ROOT.TLine(beginX, 1.0, endX, 1.0) 
+        l.SetLineWidth(2)
+        l.SetLineColor(ROOT.kBlack)
+        l.SetLineStyle(7)
+        l.Draw("SAME")
+
         canvas.RedrawAxis()
         
         canvas.Print(self.outputDir + "/%s_%s_%s_%s_%s.pdf"%(self.year, tagger, measurement, ptBin, category))
@@ -482,8 +494,17 @@ class Plotter:
             yvalerrlo = array.array('d', [-1.0 for i in range(len(names))])
             yvalerrhi = array.array('d', [-1.0 for i in range(len(names))])
             
+            sfNaming = "%s_%s_vs_topPt_%s"%(self.year, measurement.replace("Mis", "MisTagSF").replace("Eff", "TagRateSF"), algo.replace("Res", "Resolved").replace("Mrg", "Merged"))
+            sfFile = ROOT.TFile.Open("%s_SF.root"%(self.year), "UPDATE")
+
+            binEdges = []
             for name in names:
     
+                binEdges.append(float(name.split("-")[0]))
+
+                if name == names[-1]:
+                    binEdges.append(float(name.split("-")[1]))
+
                 iname = names.index(name)
 
                 SF      = -1.0
@@ -507,6 +528,20 @@ class Plotter:
                 yvalerrlo[iname] = SFLoErr
                 yvalerrhi[iname] = SFHiErr
     
+            sfHist = ROOT.TH1F(sfNaming, sfNaming, len(binEdges)-1, array.array('d', binEdges))
+            for i in range(len(yval)):
+                val = 1.0
+                err = 0.0
+                if yval[i] > 0.0:
+                    val = yval[i]
+                    err = max(yvalerrlo[i], yvalerrhi[i])
+                sfHist.SetBinContent(i+1, val)
+                sfHist.SetBinError(i+1, err)
+
+            sfFile.cd()
+            sfHist.Write()
+            sfFile.Close()
+
             sfGraph = ROOT.TGraphAsymmErrors(len(names),xval,yval,xvalerr,xvalerr,yvalerrlo,yvalerrhi)
             sfGraph.SetLineColor(color)
             sfGraph.SetMarkerColor(color)

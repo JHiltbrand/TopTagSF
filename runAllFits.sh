@@ -144,7 +144,7 @@ then
                         OVERWRITESTR="--overwrite"
                     fi
 
-                    python makeInputsAndCards.py --inputDir ${INPUTDIR}/${YEAR} --outputDir ${OUTPUTDIR} --tree ${TREENAME} --year ${YEAR} --measure ${MEASURE} --tagger ${TAGGER} --ptBin ${PTBIN} ${SYSTSTR} ${OVERWRITESTR} >> ${OUTPUTDIR}/makeInputsAndCards_${RUNTIME}.log 2>&1
+                    python makeInputsAndCards.py --inputDir ${INPUTDIR} --outputDir ${OUTPUTDIR} --tree ${TREENAME} --year ${YEAR} --measure ${MEASURE} --tagger ${TAGGER} --ptBin ${PTBIN} ${SYSTSTR} ${OVERWRITESTR} >> ${OUTPUTDIR}/makeInputsAndCards_${RUNTIME}.log 2>&1
                 done
             done
         done

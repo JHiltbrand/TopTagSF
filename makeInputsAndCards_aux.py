@@ -28,8 +28,8 @@ def initHistos(year, measurement, tagger, ptbin, doSysts):
     # Four main selections, efficiency and mistag, and pass or fail categories
     selections = {"Eff_pass" : "pass_TTCR${SYST}&&best%sTopDisc${SYST}>${WP}"%(topType),
                   "Eff_fail" : "pass_TTCR${SYST}&&best%sTopDisc${SYST}<=${WP}"%(topType),
-                  "Mis_pass" : "pass_QCDCR${SYST}&&best%sTopDisc${SYST}>${WP}"%(topType),
-                  "Mis_fail" : "pass_QCDCR${SYST}&&best%sTopDisc${SYST}<=${WP}"%(topType)
+                  "Mis_pass" : "pass_QCDCR${SYST}&&NGoodBJets_pt30${SYST}==0&&best%sTopDisc${SYST}>${WP}"%(topType),
+                  "Mis_fail" : "pass_QCDCR${SYST}&&NGoodBJets_pt30${SYST}==0&&best%sTopDisc${SYST}<=${WP}"%(topType)
     }
 
     histosInfo = {"${TOP}TopCandMass" : {"weight" : "weight${PROC}${SYST}", "selection" : "${SELECTION}", "variable" : "best%sTopMass${SYST}"%(topType), "xbins" : 30, "xmin" : 100, "xmax" : 250}}
@@ -99,6 +99,9 @@ def initHistos(year, measurement, tagger, ptbin, doSysts):
                         if   tagger == "Res":
                             if "Inf" in ptbin and measurement == "Eff":
                                 hopsCopy["xbins"] = 15
+                            elif "0" in ptbin:
+                                hopsCopy["xbins"] = range(100, 255, 5)
+                                
                         elif tagger == "Mrg":
                             if measurement == "Eff": 
                                 hopsCopy["xbins"] = range(100, 220, 20) + [220., 285., 350.]

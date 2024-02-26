@@ -1,6 +1,7 @@
 #! /bin/env/python
 
 import os
+import json
 import array
 import shutil
 import argparse
@@ -25,6 +26,53 @@ class SFresult:
 
     def uniqueId(self):
         return self.tagger + self.measurement + self.ptBin
+
+    def increaseUnc(self, impactsJson):
+
+        if self.measurement != "Mis":
+            return
+
+        payload = json.load(open(impactsJson))
+
+        self.SF = payload["POIs"][0]["fit"][1]
+        self.SFHiErr = payload["POIs"][0]["fit"][2] - self.SF
+        self.SFLoErr = self.SF - payload["POIs"][0]["fit"][0]
+
+        print(self.SFHiErr, self.SFLoErr)
+        paramResults = payload["params"]
+
+        totalErrHi = 0.0
+        totalErrLo = 0.0
+
+        proc = "TTmatch"
+        if self.measurement == "Mis":
+            proc = "QCD"
+
+        for paramResult in paramResults:
+            name      = paramResult["name"]
+
+            if name != "JEC":
+                continue
+
+            tempImpHi = paramResult["SF_%s"%(proc)][2] - paramResult["SF_%s"%(proc)][1]
+            tempImpLo = paramResult["SF_%s"%(proc)][1] - paramResult["SF_%s"%(proc)][0]
+   
+            pullErrHi = paramResult["fit"][2] - paramResult["fit"][1]
+            pullErrLo = paramResult["fit"][1] - paramResult["fit"][0]
+       
+            factorHi = 1.0
+            factorLo = 1.0
+            if pullErrHi != 0.0: factorHi = 1.0/pullErrHi
+            if pullErrLo != 0.0: factorLo = 1.0/pullErrLo
+            print(factorHi, factorLo)
+
+            tempErrHi = self.SFHiErr**2.0 - tempImpHi**2.0
+            tempErrLo = self.SFLoErr**2.0 - tempImpLo**2.0
+
+            self.SFHiErr = (tempErrHi + (factorHi * tempImpHi)**2.0)**0.5
+            self.SFLoErr = (tempErrLo + (factorLo * tempImpLo)**2.0)**0.5
+
+        print(self.SFHiErr, self.SFLoErr)
 
 class Plotter:
     
@@ -51,7 +99,7 @@ class Plotter:
             "ST"               : ROOT.TColor.GetColor("#fb8072"),
             "Rare"             : ROOT.TColor.GetColor("#fdb462"),
             "DYJets"           : ROOT.TColor.GetColor("#80b1d3"),
-            "Other"            : ROOT.TColor.GetColor("#80b1d3"),
+            "Other"            : ROOT.TColor.GetColor("#fb8072"),
             "WJets"            : 41
         }
 
@@ -115,8 +163,11 @@ class Plotter:
 
             impactsFile = fitDir.replace("/", "").replace("_inputs", "").replace("topPt", "") + "_impacts.pdf"
             impactsPath = fitPath + "/" + impactsFile 
+            impactsJson = fitPath + "/impacts.json"
             if os.path.exists(impactsPath):
                 shutil.copyfile(impactsPath, self.outputDir + "/" + impactsFile.replace("Inf", "1200"))
+
+            aResult.increaseUnc(impactsJson)
 
         if doEff:
             self.getSFSummary(results, "Eff")
@@ -216,7 +267,7 @@ class Plotter:
         if   measurement == "Eff":
             orderedNames = ["TTmatch", "TTunmatch", "Other", "QCD", "WJets", "DYJets", "Boson", "TTX", "ST", "total", "data"]
         elif measurement == "Mis":
-            orderedNames = ["QCD", "TT", "WJets", "DYJets", "Boson", "TTX", "ST", "total", "data"]
+            orderedNames = ["QCD", "TT", "Other", "WJets", "DYJets", "Boson", "TTX", "ST", "total", "data"]
 
         finputs = ROOT.TFile.Open("%s/top_mass_%s.root"%(fitpath, category), "READONLY")
         if finputs == None:
@@ -366,7 +417,7 @@ class Plotter:
             elif measurement == "Mis":
                 xMax = 250.0
 
-        #prefitHistos["total"].GetXaxis().SetRangeUser(100.0, xMax)
+        prefitHistos["total"].GetXaxis().SetRangeUser(100.0, 250.0)
 
         prefitHistos["total"].Draw("HIST E0")
        
@@ -419,14 +470,14 @@ class Plotter:
         h_r_postfit.GetXaxis().SetTitle("Top Candidate Mass [GeV]")
         h_r_postfit.GetYaxis().SetTitle("Data / Post-fit")
         h_r_postfit.GetYaxis().SetRangeUser(0.01,1.99)
-        #h_r_postfit.GetXaxis().SetRangeUser(100.0, xMax)
+        h_r_postfit.GetXaxis().SetRangeUser(100.0, 250.0) 
 
         beginX = h_r_postfit.GetXaxis().GetXmin()
         endX   = h_r_postfit.GetXaxis().GetXmax()
 
         h_r_postfit.Draw("P E0 SAME")
 
-        l = ROOT.TLine(beginX, 1.0, endX, 1.0) 
+        l = ROOT.TLine(100.0, 1.0, 250.0, 1.0) 
         l.SetLineWidth(2)
         l.SetLineColor(ROOT.kBlack)
         l.SetLineStyle(7)
@@ -473,7 +524,7 @@ class Plotter:
                 dummy = ROOT.TH1F("dummy","dummy",len(names),0.,len(names))
                 for name in names:
                     dummy.GetXaxis().SetBinLabel(names.index(name)+1, name)
-                dummy.GetYaxis().SetRangeUser(0.5,2.)
+                dummy.GetYaxis().SetRangeUser(0.2,2.4)
                 dummy.GetYaxis().SetTitleOffset(0.9)
                 dummy.GetYaxis().SetLabelSize(0.04)
                 dummy.GetYaxis().SetTitleSize(0.05)
@@ -563,7 +614,7 @@ class Plotter:
         dummy.Draw("HIST")
 
         for sfGraph in sfGraphs:
-            sfGraph.Draw("EP SAMES")
+            sfGraph.Draw("EP0 SAMES")
     
         leg.Draw("SAME")
 

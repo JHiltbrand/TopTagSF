@@ -1,4 +1,4 @@
-#  TopTagSF
+#  TopTaggerSF
 
 Standalone code to calculate top tagging SFs using template histograms and the tag and probe model in Higgscombine
 
@@ -22,7 +22,7 @@ scram b -j4
 
 cd ../..
 
-git clone git@github.com:JHiltbrand/TopTagSF.git
+git clone git@github.com:StealthStop/TopTaggerSF.git
 
 cd TopTagSF
 

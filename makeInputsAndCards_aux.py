@@ -32,7 +32,7 @@ def initHistos(year, measurement, tagger, ptbin, doSysts):
                   "Mis_fail" : "pass_QCDCR${SYST}&&NGoodBJets_pt30${SYST}==0&&best%sTopDisc${SYST}<=${WP}"%(topType)
     }
 
-    histosInfo = {"${TOP}TopCandMass" : {"weight" : "weight${PROC}${SYST}", "selection" : "${SELECTION}", "variable" : "best%sTopMass${SYST}"%(topType), "xbins" : 30, "xmin" : 100, "xmax" : 250}}
+    histosInfo = {"${TOP}TopCandMass" : {"weight" : "weight${PROC}${SYST}", "selection" : "${SELECTION}", "variable" : "max(101.0, min(best%sTopMass${SYST}, 264.0))"%(topType), "xbins" : 15, "xmin" : 100, "xmax" : 250}}
 
     # Match process names to generic name used for naming ROOT files
     # Also, for efficiency, split TT into GEN matched and unmatched categories
@@ -41,13 +41,14 @@ def initHistos(year, measurement, tagger, ptbin, doSysts):
     if measurement == "Eff":
         processes["TTmatch"]   = "TT"
         processes["TTunmatch"] = "TT"
-        processes["QCD"]       = "QCD"
+        #processes["QCD"]       = "QCD"
     elif measurement == "Mis":
         processes["QCD"]   = "QCD"
         processes["TT"]    = "TT"
-    processes["Boson"]  = "Boson"
-    processes["TTX"]    = "TTX"
-    processes["ST"]     = "ST"
+    processes["Other"]     = "Other"
+    #processes["Boson"]  = "Boson"
+    #processes["TTX"]    = "TTX"
+    #processes["ST"]     = "ST"
 
     # Depending on type of measurement, pick the correct data sample
     if   measurement == "Eff": processes["SingleMuon"] = "Data_SingleMuon"
@@ -87,7 +88,8 @@ def initHistos(year, measurement, tagger, ptbin, doSysts):
                 extraSel = ""
                 if   process == "TTmatch":   extraSel = "&&best%sTopMassGenMatch%s==1"%(topType, systTreeStub)
                 elif process == "TTunmatch": extraSel = "&&best%sTopMassGenMatch%s==0"%(topType, systTreeStub)
-            
+                #elif process == "QCD":       extraSel = "&&weightQCD%s<=100.0"%(systTreeStub)
+
                 for cat in ["pass", "fail"]:
 
                     selStr = "%s_%s"%(measurement, cat)
@@ -97,16 +99,9 @@ def initHistos(year, measurement, tagger, ptbin, doSysts):
                         hopsCopy = copy.copy(histoOps)
 
                         if   tagger == "Res":
-                            if "Inf" in ptbin and measurement == "Eff":
-                                hopsCopy["xbins"] = 15
-                            elif "0" in ptbin:
-                                hopsCopy["xbins"] = range(100, 255, 5)
-                                
+                            hopsCopy["xbins"] = range(100, 275, 25)
                         elif tagger == "Mrg":
-                            if measurement == "Eff": 
-                                hopsCopy["xbins"] = range(100, 220, 20) + [220., 285., 350.]
-                            else:
-                                hopsCopy["xbins"] = [0., 100.] + range(110, 250, 10) + [250., 275., 300., 500.] 
+                            hopsCopy["xbins"] = range(100, 280, 15)
 
                         # Decide which event weight to use based on the desired measurement
                         proc = ""

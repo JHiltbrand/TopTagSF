@@ -20,7 +20,7 @@ def makeNDhisto(year, histName, histOps, outfile, tree):
 
     # To efficiently TTree->Draw(), we will only "activate"
     # necessary branches. So first, disable all branches
-    tree.SetBranchStatus("*", 0)
+    tree.SetBranchStatus("*", 1)
 
     selection = histOps["selection"]
     variable  = histOps["variable"]
@@ -32,23 +32,23 @@ def makeNDhisto(year, histName, histOps, outfile, tree):
     # The idea is to turn the concatStr into a comma separated list of branches
     # Parenthesis can simply be removed, operators are simply replace with a comma
     # After all replacements, the string is split on the comma and filtered for empty strings
-    expressions = re.findall(r'(\w+::\w+)', concatStr)
-    for exp in expressions:
-        concatStr = concatStr.replace(exp, "")
-    concatStr = re.sub("[()]", "", concatStr)
-    for replaceStr in ["&&", "||", "==", "<=", ">=", ">", "<", "*", ".", "/", "+", "-", ":"]:
-        concatStr = concatStr.replace(replaceStr, ",")
-    branches = list(filter(bool, concatStr.split(",")))
+    #expressions = re.findall(r'(\w+::\w+)', concatStr)
+    #for exp in expressions:
+    #    concatStr = concatStr.replace(exp, "")
+    #concatStr = re.sub("[()]", "", concatStr)
+    #for replaceStr in ["&&", "||", "==", "<=", ">=", ">", "<", "*", ".", "/", "+", "-", ":"]:
+    #    concatStr = concatStr.replace(replaceStr, ",")
+    #branches = list(filter(bool, concatStr.split(",")))
 
     # Here, the branches list will be names of branches and strings of digits
     # The digits are residual cut expressions like NGoodJets_pt30>=7 ==> "NGoodJets_pt30", "7"
     # So if a supposed branch name can be turned into an int, then it is not a legit branch name
-    for branch in branches:
-        try:
-            int(branch)
-            continue
-        except:
-            tree.SetBranchStatus(branch, 1)
+    #for branch in branches:
+    #    try:
+    #        int(branch)
+    #        continue
+    #    except:
+    #        tree.SetBranchStatus(branch, 1)
 
     outfile.cd()
 
@@ -135,6 +135,26 @@ def writeLine(processes, card, header1, header2, value1, value2, appliesTo):
 
     return card
 
+def getDataMCfactor(directory, processes):
+
+    fpass = ROOT.TFile.Open("%s/top_mass_pass.root"%(directory), "READ")
+    ffail = ROOT.TFile.Open("%s/top_mass_fail.root"%(directory), "READ")
+
+    Ndata = 0.0
+    hdata_pass = fpass.Get("data_obs")
+    Ndata += hdata_pass.Integral()
+    hdata_fail = ffail.Get("data_obs")
+    Ndata += hdata_fail.Integral()
+
+    Nmc = 0.0
+    for proc in processes:
+        hmc_pass = fpass.Get(proc)
+        Nmc += hmc_pass.Integral()
+        hmc_fail = ffail.Get(proc)
+        Nmc += hmc_fail.Integral()
+
+    return Ndata / Nmc
+
 def makeDatacard(outputDir, processes, systematics, measure, year):
 
     card = open("%s/sf.txt"%(outputDir), "w")
@@ -142,6 +162,8 @@ def makeDatacard(outputDir, processes, systematics, measure, year):
     # Do not need data in this list
     if "JetHT"      in processes: processes.pop("JetHT")
     if "SingleMuon" in processes: processes.pop("SingleMuon")
+
+    dataMC = getDataMCfactor(outputDir, processes)
 
     nprocesses = len(processes.keys())
 
@@ -190,6 +212,8 @@ def makeDatacard(outputDir, processes, systematics, measure, year):
             # Use Up version as syst name while stripping up/down
             card = writeLine(processes.keys(), card, syst, "shape", 1, 1, ["ALL"])
 
+    card.write("\nMCnorm rateParam * * %f [0.0,%f]\n"%(dataMC,10.0*dataMC))
+
     card.write("\n*  autoMCStats  0\n")
     card.close()
 
@@ -205,12 +229,12 @@ def makeCombineScript(outputDir, categories, year, tagger, measure, ptBin):
     script.write("echo \"Do tag and probe\"\n")
     script.write("text2workspace.py -m 173.2 -P HiggsAnalysis.CombinedLimit.TagAndProbeExtended:tagAndProbe sf.txt --PO categories=%s\n\n"%(categories))
     script.write("echo \"Run the FitDiagnostics\"\n")
-    script.write("combine -M FitDiagnostics -m 173.2 sf.root --saveShapes --saveWithUncertainties --robustFit=1 --setRobustFitStrategy 1 --X-rtd MINIMIZER_analytic --cminDefaultMinimizerTolerance 5.\n\n")
+    script.write("combine -M FitDiagnostics -m 173.2 sf.root --saveShapes --saveWithUncertainties --robustFit=1 --setRobustFitStrategy 1 --stepSize 0.01 --X-rtd MINIMIZER_analytic --X-rtd FAST_VERTICAL_MORPH\n\n")
     script.write("if [[ ${DOIMPACTS} -eq 1 ]]\n")
     script.write("then\n")
     script.write("    echo \"Run impacts\"\n")
-    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --doInitialFit --robustFit 1 --exclude 'rgx{prop.*}'\n")
-    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --robustFit 1 --doFits --parallel 4 --exclude 'rgx{prop.*}'\n")
+    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --setRobustFitStrategy 1 --stepSize 0.01 --X-rtd MINIMIZER_analytic --X-rtd FAST_VERTICAL_MORPH --doInitialFit --robustFit 1 --exclude 'rgx{prop.*}'\n")
+    script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 --setRobustFitStrategy 1 --stepSize 0.01 --X-rtd MINIMIZER_analytic --X-rtd FAST_VERTICAL_MORPH --robustFit 1 --doFits --parallel 4 --exclude 'rgx{prop.*}'\n")
     script.write("    combineTool.py -M Impacts -d sf.root -m 173.2 -o impacts.json --exclude 'rgx{prop.*}'\n")
     script.write("    plotImpacts.py -i impacts.json -o impacts\n")
     script.write("    mv impacts.pdf %s_%s_%s%s_impacts.pdf\n"%(year, tagger, measure, ptBin))
